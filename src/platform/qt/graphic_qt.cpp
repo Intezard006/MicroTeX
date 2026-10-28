@@ -11,6 +11,8 @@
 #include <QBrush>
 #include <QColor>
 #include <QFont>
+#include <QTransform>
+#include <cmath>
 #include <QFontDatabase>
 #include <QPainter>
 #include <QPen>
@@ -44,7 +46,8 @@ Font_qt::Font_qt(const string& family, int style, float size) {
 //  qInfo() << "new font" << QString::fromStdString(family) << style << size;
 
   _font.setFamily(QString::fromStdString(family));
-  _font.setPointSizeF(size);
+  _font.setPointSizeF(size * 0.75);
+  _font.setHintingPreference(QFont::PreferNoHinting);
 
   _font.setBold(style & BOLD);
   _font.setItalic(style & ITALIC);
@@ -55,7 +58,8 @@ Font_qt::Font_qt(const string& file, float size)
 //  qInfo() << "new font" << QString::fromStdString(file) << size;
 
   // set size for newly loaded and previously loaded font
-  _font.setPointSizeF(size);
+  _font.setPointSizeF(size * 0.75);
+  _font.setHintingPreference(QFont::PreferNoHinting);
 
   QString filename(QString::fromStdString(file));
   if(!QFile::exists(filename)) {
@@ -107,7 +111,7 @@ QFont Font_qt::getQFont() const {
 }
 
 float Font_qt::getSize() const {
-  return _font.pointSizeF();
+  return _font.pointSizeF() / 0.75;
 }
 
 sptr<Font> Font_qt::deriveFont(int style) const {
@@ -303,6 +307,21 @@ void Graphics2D_qt::drawText(const std::wstring& t, float x, float y) {
   //for(size_t i=0; i<t.size(); ++i)
   //  qInfo() << 'v' << int(t[i]);
 
+  // graphite: MicroTeX loads fonts at ~1px and scales the painter by the text size. Glyphs scaled
+  // that way fail to rasterise in some FreeType builds and look soft, so bake the scale into the
+  // font size instead and draw at the real size.
+  const QTransform xf = _painter->transform();
+  const qreal s = std::hypot(xf.m11(), xf.m12());
+  if (s > 1.5 && s < 4000) {
+    QFont f = _font->getQFont();
+    f.setPointSizeF(f.pointSizeF() * s);
+    _painter->save();
+    _painter->setTransform(QTransform::fromScale(1 / s, 1 / s) * xf);
+    _painter->setFont(f);
+    _painter->drawText(QPointF(x * s, y * s), text);
+    _painter->restore();
+    return;
+  }
   _painter->drawText(QPointF(x, y), text);
 }
 
